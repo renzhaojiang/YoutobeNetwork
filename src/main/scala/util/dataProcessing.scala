@@ -7,6 +7,26 @@ import scala.annotation.tailrec
 
 object dataProcessing {
 
+  def historyList2Feature(historyList:List[(Long,String,Float)]
+                          ,windowTime:Long,labelName:String
+                          ,historyBehaviorNameArray:Array[String]
+                          ,historyBehaviorReturnSizeArray:Array[Int]) ={
+    val historyMap = historyBehaviorNameArray.zip(historyBehaviorReturnSizeArray).toMap
+    historyList.filter(_._2==labelName).map { case (labelTimestamp,labelEvent,labelItem) => {
+      val historyBehavior = historyBehaviorNameArray.map{eventName=> {
+        val itemTimeList = historyList.map { case (timestamp, event, item) => (labelTimestamp - timestamp, event, item) }
+          .filter(list => {
+            list._2 == eventName && list._1 > 0 && list._1 < windowTime
+          }).map(e=>(e._3,e._1)).sortWith(_._2>_._2)
+        val itemTimeListAfter = returnHistoryAndWeight(itemTimeList,historyMap(eventName))
+        itemTimeListAfter
+      }}.toList
+      val futureLabelItemList = historyList.filter(list=>{list._2==labelName&&list._1>labelTimestamp}).map(_._3)
+      (labelTimestamp,labelItem,futureLabelItemList,historyBehavior)
+    }}
+
+  }
+
   def returnHistoryAndWeight(list:List[(Float,Long)],returnSize:Int) ={
     val padOrCutList = if(list.size==returnSize) {list}
     else if(list.size<returnSize) {List.fill(returnSize-list.length)(0f).++(list.map(_._1))
@@ -24,19 +44,20 @@ object dataProcessing {
   }
 
   def time2Weight(list:List[Long]) ={
-    val list1 = list.map(x=> if(x==0l) {0d} else {1/math.log(x.toDouble/1000/60)})
-    val sum = list1.sum
-    list1.map(x=>if(sum==0d) {0f} else {math.abs((x/sum).toFloat)})
+    val weightList = list.map(x=> if(x==0l) {0d} else {1/math.log(x.toDouble/1000/60+1d)})
+    val sum = weightList.sum
+    weightList.map(x=>if(sum==0d) {0f} else {math.abs((x/sum).toFloat)})
+
   }
 
-  def listSplit(list: List[(Float,String,Long)]) ={
-    @tailrec
-    def listSplitIn(list: List[(Float,String,Long)],returnList:List[(Float,String,Long)]):List[(Float,String,Long)] ={
-      if(list.head._2=="transaction") returnList.++(List(list.head))
-      else listSplitIn(list.drop(1),returnList.++(List(list.head)))
-    }
-    listSplitIn(list,List[(Float,String,Long)]())
-  }
+//  def listSplit(list: List[(Float,String,Long)]) ={
+//    @tailrec
+//    def listSplitIn(list: List[(Float,String,Long)],returnList:List[(Float,String,Long)]):List[(Float,String,Long)] ={
+//      if(list.head._2=="transaction") returnList.++(List(list.head))
+//      else listSplitIn(list.drop(1),returnList.++(List(list.head)))
+//    }
+//    listSplitIn(list,List[(Float,String,Long)]())
+//  }
 
   def list2JTreeMap(list:List[(Long,List[Float])]):JTreeMap[Long,List[Float]] ={
     val JTreeMap = new JTreeMap[Long,List[Float]]()
@@ -52,7 +73,7 @@ object dataProcessing {
 
 
   def main(args: Array[String]): Unit = {
-    val timeList = List(0l,0l,2693338l,1758864l,837681l)
+    val timeList = List(0l,0l,5l,999l,9999l)
     println(time2Weight(timeList))
 
   }

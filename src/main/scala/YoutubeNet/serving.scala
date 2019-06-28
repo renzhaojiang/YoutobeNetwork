@@ -24,14 +24,14 @@ object serving  {
   }
 
   def mapUserFeature(user:Float) = {
-    val mergeRDD = merge(session)
-    val categoryDimArray = Array(mergeRDD.map(_._4._3.head).max.toInt+1,mergeRDD.map(_._4._3.last).max.toInt+1)
-    val userItemSample = mergeRDD.map{case (user,item,timestamp,(embeddingInput,embeddingWeight,categoryList,label))=>{
+    val (mergeRDD,itemDim) = merge(session)
+    val categoryDimArray = Array(mergeRDD.map(_._2._3.head).max.toInt+1,mergeRDD.map(_._2._3.last).max.toInt+1)
+    val userItemSample = mergeRDD.map{case ((user,item,timestamp,futureItemList),(embeddingInput,embeddingWeight,categoryList,label))=>{
       val embeddingTensor = list2DenseTensor(embeddingInput)
       val embeddingWeightTensor = list2DenseTensor(embeddingWeight)
       val categoryTensor = list2DenseTensor(categoryMerge.merge(categoryList,categoryDimArray))
       val labelTensor = list2DenseTensor(label).reshape(Array(4))
-      (user,item,timestamp,TensorSample[Float](Array(embeddingTensor,embeddingWeightTensor,categoryTensor),Array(labelTensor)))
+      ((user,item,timestamp,futureItemList),TensorSample[Float](Array(embeddingTensor,embeddingWeightTensor,categoryTensor),Array(labelTensor)))
     }}
     userItemSample
   }
@@ -43,7 +43,7 @@ object serving  {
     val mergeRDD = mapUserFeature(1f)
     mergeRDD.take(10).foreach(println)
 
-    val user = mergeRDD.map(_._4).take(1)
+    val user = mergeRDD.map(_._2).take(1)
 
     val userVector = userVectorModel.predict(user).head.asInstanceOf[Tensor[Float]].toArray().toList
     println(userVector)
