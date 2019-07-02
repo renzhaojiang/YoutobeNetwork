@@ -1,6 +1,6 @@
-import YoutubeNet.BuildModel.buildModel
-import YoutubeNet.FeatureEngine._
-import YoutubeNet.{CompileParams, FitModel, NetParams}
+import YoutubeNet.recall.BuildModel.buildModel
+import YoutubeNet.recall.FeatureEngine._
+import YoutubeNet.recall.{CompileParams, FitModel, NetworkParams}
 import com.intel.analytics.bigdl.dataset.TensorSample
 import com.intel.analytics.bigdl.utils.Engine
 import org.apache.log4j.{Level, Logger}
@@ -18,35 +18,37 @@ object TestYoutubeNet {
   Engine.init
 
   def main(args: Array[String]): Unit = {
-    val (mergeRDD,itemDim) = merge(session)
+    val itemSize = 8
+    val labelName = "transaction"
+    val historyBehaviorNameArray = Array("view","addtocart","transaction")
+    val historyBehaviorReturnSizeArray = Array(50,50,30)
+
+    val (mergeRDD,itemDim) = merge(session,itemSize,labelName,historyBehaviorNameArray,historyBehaviorReturnSizeArray)
     mergeRDD.take(10).foreach(println)
 
-//    val itemDim = mergeRDD.map(_._4._1).reduce(_++_).toSet.max.toInt+1
-    val categoryDimArray = Array(mergeRDD.map(_._2._3.head).max.toInt+1,mergeRDD.map(_._2._3.last).max.toInt+1)
+    val categoryDimArray = Array(mergeRDD.map(_._2._4.head).max.toInt+1,mergeRDD.map(_._2._4.last).max.toInt+1)
 
-    val embeddingSizeArray = Array(10,5,3,8)
-    val embeddingWeightSizeArray = Array(10,5,3)
     val itemEmbeddingSize = 256
+    val historyItemSizeArray = Array(50,50,30)
     val categoryEmbeddingSize = 64
     val hiddenLayerArray = Array(1024,512,itemEmbeddingSize)
-
-    val modelParams = NetParams(embeddingSizeArray,embeddingWeightSizeArray,itemDim,itemEmbeddingSize,categoryDimArray,categoryEmbeddingSize,hiddenLayerArray)
+    val continuousSize = 0
+    val  modelParams = NetworkParams(itemDim,itemEmbeddingSize,itemSize,historyItemSizeArray,categoryDimArray,categoryEmbeddingSize,continuousSize,hiddenLayerArray)
     val (model,userVectorOutputModel) = buildModel(modelParams)
-    println(model.getInputShape(),model.getOutputShape())
-    println(userVectorOutputModel.getInputShape(),userVectorOutputModel.getOutputShape())
 
     val lr = 0.0005
     val lrDecay = 1e-6
     val batchSize = 256
-    val epoch = 5
+    val epoch = 10
     val compileParams = CompileParams(lr,lrDecay,batchSize,epoch)
 
-    val userItemSample = mergeRDD.map{case ((user,item,timestamp,futureItemList),(embeddingInput,embeddingWeight,categoryList,label))=>{
+    val userItemSample = mergeRDD.map{case ((user,item,timestamp,futureItemList),(itemInput,embeddingInput,embeddingWeight,categoryList,label))=>{
+      val itemInputTensor = list2DenseTensor(itemInput)
       val embeddingTensor = list2DenseTensor(embeddingInput)
       val embeddingWeightTensor = list2DenseTensor(embeddingWeight)
       val categoryTensor = list2DenseTensor(categoryMerge.merge(categoryList,categoryDimArray))
-      val labelTensor = list2DenseTensor(label).reshape(Array(embeddingSizeArray(3)))
-      ((user,item,timestamp,futureItemList),TensorSample[Float](Array(embeddingTensor,embeddingWeightTensor,categoryTensor),Array(labelTensor)))
+      val labelTensor = list2DenseTensor(label).reshape(Array(itemSize))
+      ((user,item,timestamp,futureItemList),TensorSample[Float](Array(itemInputTensor,embeddingTensor,embeddingWeightTensor,categoryTensor),Array(labelTensor)))
     }}
 
     FitModel.fit(userItemSample,model,compileParams)
@@ -66,7 +68,8 @@ object TestYoutubeNet {
       itemEmbeddingVector+=row
     }
     itemEmbeddingVector.take(10).foreach(println)
-    session.sparkContext.parallelize(itemEmbeddingVector,1).saveAsTextFile("..\\data\\params\\itemEmbedding")
+    session.sparkContext.parallelize(itemEmbeddingVector,1)
+      .saveAsTextFile("..\\data\\params\\itemEmbedding")
   }
 
 }

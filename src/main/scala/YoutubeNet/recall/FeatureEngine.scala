@@ -1,15 +1,17 @@
-package YoutubeNet
+package YoutubeNet.recall
 
-import com.intel.analytics.bigdl.utils.Engine
 import org.apache.log4j.{Level, Logger}
 import org.apache.spark.rdd.RDD
 import org.apache.spark.sql.SparkSession
-import util.dataProcessing.{historyList2Feature, list2JTreeMap, returnHistoryAndWeight}
+import util.dataProcessing.{historyList2Feature, list2JTreeMap1}
 import util.negativeSampling.{buildTable, getNegativeSample}
 
 object FeatureEngine {
   Logger.getLogger("org").setLevel(Level.ERROR)
-  def loadEventData(session: SparkSession) ={
+  def loadEventData(session: SparkSession
+                    ,labelName:String
+                    ,historyBehaviorNameArray:Array[String]
+                    ,historyBehaviorReturnSizeArray:Array[Int]) ={
     val windowTime = 259200000l //3days
 
     var eventRDD:RDD[(Long,Float,Float,String)] = session.sparkContext.textFile("..\\data\\EcommerceDataSet\\events.csv")
@@ -36,8 +38,8 @@ object FeatureEngine {
     eventRDD = eventRDD.map{case (timestamp,user,item,event)=> (timestamp,user,itemIndexMap(item)+1f,event)}
     //extract history behavior
     val userSampleRDD = eventRDD.map{case (timestamp,user,item,event)=>(user, List((timestamp,event,item)) )}
-      .reduceByKey(_++_).filter(_._2.map(_._2).contains("transaction"))
-      .flatMapValues(historyList2Feature(_,windowTime,"transaction",Array("view","addtocart","transaction"),Array(10,5,3)))
+      .reduceByKey(_++_).filter(_._2.map(_._2).contains(labelName))
+      .flatMapValues(historyList2Feature(_,windowTime,labelName,historyBehaviorNameArray,historyBehaviorReturnSizeArray))
       .map{case (user,(timestamp,item,futureItemList,historyBehavior))=>((user,item,timestamp,futureItemList),historyBehavior)}
     //negative sample table
     val itemCount = eventRDD.map(_._3).countByValue().toMap
@@ -90,14 +92,19 @@ object FeatureEngine {
       .map{case (timestamp,item,property,value)=>(item,List((timestamp,value.toFloat,categoryParentMap.getOrElse[Float](value.toFloat,0f))) )}
       .reduceByKey(_++_)
       .mapValues(x=>x.map{case (timestamp,category,parent)=>(timestamp,List(category,parent))})
-      .mapValues(list2JTreeMap(_))
+      .mapValues(list2JTreeMap1(_))
       .collectAsMap()
 
     categoryDataRDD.toMap
   }
 
-  def merge(session: SparkSession) ={
-    val (userSampleRDD,table,itemDim)= loadEventData(session)
+  def merge(session: SparkSession,
+            itemSize:Int
+            ,labelName:String
+            ,historyBehaviorNameArray:Array[String]
+            ,historyBehaviorReturnSizeArray:Array[Int]) ={
+
+    val (userSampleRDD,table,itemDim)= loadEventData(session,labelName,historyBehaviorNameArray,historyBehaviorReturnSizeArray)
     //    eventRDD.take(10).foreach(println)
     val itemCategoryMap = loadCategoryData(session)
     //    itemCategoryMap.take(10).foreach(println)
@@ -108,9 +115,9 @@ object FeatureEngine {
           itemCategoryMap(item).lowerEntry(timestamp).getValue} else itemCategoryMap(item).firstEntry().getValue}
       else List(0f,0f)
       val beforeItemList = historyBehavior.map(_._1).reduce(_++_).distinct++List(item)
-      val itemList = List(item)++getNegativeSample(table,7,beforeItemList)
+      val itemList = List(item)++getNegativeSample(table,itemSize-1,beforeItemList)
       val label =  List(1f)++Array.fill(itemList.size-1){0f}.toList
-      ((user,item,timestamp,futureItemList),(historyBehavior.map(_._1).reduce(_++_)++itemList,historyBehavior.map(_._2).reduce(_++_),categoryList,label))
+      ((user,item,timestamp,futureItemList),(itemList,historyBehavior.map(_._1).reduce(_++_),historyBehavior.map(_._2).reduce(_++_),categoryList,label))
     }
     }
     (mergeRDD,itemDim)
